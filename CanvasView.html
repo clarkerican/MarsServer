@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>CanvasView</title>
+</head>
+<body>
+
+<div id="angular-test" style="margin: 10px" ng-app>
+    <div ng-controller="CanvasCtrl">
+        <h1>Mars</h1>
+        <input ng-model="moveCommand" id="move" autocomplete="off"/>
+        <input ng-click="moveSubmit()" type="button" type="submit" value="Move!">
+        <input ng-model="rotateCommand" id="rotate" autocomplete="off"/>
+        <input ng-click="rotateSubmit()" class="btn-primary" type="submit" value="Rotate!">
+        <input ng-click="begin()" type="button" value="Begin">
+        <input ng-click="foundBump()" type="button" value="Bump">
+        <input ng-click="auto()" type="button" value="Autonomous">
+        <input ng-click="scan()" type="button" value="Scan">
+        <input ng-click="sense()" type="button" value="Sensor Data">
+        <input ng-click="standby()" type="button" value="Standby">
+        <input ng-click="sing()" type="button" value="Ready For Retrieval">
+        <br>
+        Cliff left : {{cliffLeft}}
+        Cliff left front : {{cliffFLeft}}
+        Cliff right front : {{cliffFRight}}
+        Cliff right : {{cliffRight}}
+        Bump Left: {{bumpLeft}}
+        Bump Right : {{bumpRight}}
+        Cliff Left Signal : {{cliffColorLeft}}
+        Cliff Front Left Signal : {{cliffColorFLeft}}
+        Cliff Front Right Signal : {{cliffColorFRight}}
+        Cliff Right Signal : {{cliffColorRight}}
+
+        <canvas id="mars" width="1200" height="1000" style="border:1px solid #d3d3d3;"></canvas>
+        <div id="list" style="margin-left: 620px; float:  left">
+            Points:
+            <ul>
+                <li ng-repeat="point in data">
+                    [{{point.x}}, {{point.y}}] <a ng-click="removePoint(point)">[x]</a>
+                </li>
+            </ul>
+        </div>
+        <div style="clear: both"/>
+        <ul id="messages"></ul>
+    </div>
+</div>
+
+
+
+<script src="https://ajax.googleapis.com/ajax/libs/angularjs/1.0.5/angular.min.js"></script>
+<script src="http://code.jquery.com/jquery-1.11.1.js"></script>
+<script src="https://cdn.socket.io/socket.io-1.4.5.js"></script>
+<script>
+
+    //Socket io
+    var socket = io.connect("http://localhost:8000"); //This will not be localhost and will need to be changed
+
+    //Canvas logic and
+    var counter = 0;
+    function CanvasCtrl($scope) {
+        var canvas = document.getElementById('mars');
+        var context = canvas.getContext('2d');
+        var RATIO = 5;
+        var standby = false;
+
+        $scope.robot = {rotated:0, x: 600, y: 500, diameter: 33, sensorX : 615, sensorY : 500}; //actually 33 cm (330 mm / 2 for radius, and divided by 5 for ratio)
+        $scope.data = [
+
+        ];
+        $scope.bumps = [
+
+        ];
+        $scope.cliffs = [
+
+        ];
+        $scope.borders = [
+
+        ];
+        $scope.cliffLeft        = 0;
+        $scope.cliffFLeft       = 0;
+        $scope.cliffFRight      = 0;
+        $scope.cliffRight       = 0;
+        $scope.bumpLeft         = 0;
+        $scope.bumpRight        = 0;
+        $scope.cliffColorLeft   = 0;
+        $scope.cliffColorFLeft  = 0;
+        $scope.cliffColorFRight = 0;
+        $scope.cliffColorRight  = 0;
+
+
+        $scope.sense = function(){
+          socket.emit("sense");
+        };
+
+        $scope.scan = function(){
+            socket.emit("scan","Message");
+            console.log("Scanning!");
+        };
+
+        $scope.moveSubmit = function(){
+            var moveType = standby ? 'i' : 'm';
+            socket.emit('move', {dist : $scope.moveCommand, moveType : moveType});
+            $scope.moveCommand = '';
+            $('#m').val('');
+            return false;
+        };
+
+
+        $scope.rotateSubmit = function(){
+            socket.emit('rotate', {degrees: $scope.rotateCommand});
+            console.log($scope.rotateCommand);
+            $scope.rotateCommand = '';
+            $('#m').val('');
+            return false;
+        };
+
+        $scope.addData = function(data) {
+            //Put it in millimeters first, then divide by 5.  Also account for the radius to place the center of the object
+            var distance = (Number(data.x) + data.diameter / 2) * 10 / RATIO;
+            var x = Math.cos(((Number(data.robot.rotated) - 90) + 180 - Number(data.angularDistance)) % 360 * Math.PI / 180) * distance + data.robot.sensorX;
+            //console.log($scope.robot.rotated - 90);
+            var y = Math.sin(((Number(data.robot.rotated) - 90) + 180 - Number(data.angularDistance)) % 360 * Math.PI / 180) * distance + data.robot.sensorY;
+            var p = {id: id, x: x, y: y, diameter: data.diameter};
+            $scope.data.push(p);
+            draw($scope.data);
+        };
+
+        $scope.sing = function(){
+            socket.emit('song');
+        };
+
+        $scope.standby = function(){
+            standby = !standby;
+        };
+
+        $scope.begin = function(){
+          socket.emit('begin');
+        };
+
+        $scope.auto = function(){
+          socket.emit('auto');
+        };
+
+        $scope.foundBump = function() {
+             addBump(false);
+        };
+
+        $scope.foundCliff = function(){
+            addCliff();
+        };
+
+        $scope.foundBorder = function(){
+            addBorder();
+        };
+
+        socket.on('message', function(msg){
+            $('#messages').append($('<li>').text(msg));
+        });
+
+        socket.on('sensorData', function(msg){
+            console.log(msg);
+            $scope.cliffLeft        = msg.cliffLeft;
+            $scope.cliffFLeft       = msg.cliffFLeft;
+            $scope.cliffFRight      = msg.cliffFRight;
+            $scope.cliffRight       = msg.cliffRight;
+            $scope.bumpLeft         = msg.bumpLeft;
+            $scope.bumpRight        = msg.bumpRight;
+            $scope.cliffColorLeft   = msg.cliffColorLeft;
+            $scope.cliffColorFLeft  = msg.cliffColorFLeft;
+            $scope.cliffColorFRight = msg.cliffColorFRight;
+            $scope.cliffColorRight  = msg.cliffColorRight;
+
+            if(msg.bumpLeft == 1 || msg.bumpRight == 1)
+            {
+                 addBump();
+            }
+        });
+
+        socket.on('scanData',function(msg){
+            console.log(msg);
+            for(var i = 0; i < msg.data.length; i ++)
+            {
+                addData(msg.data[i]);
+            }
+        });
+
+        socket.on('moveResult', function(msg){
+            console.log(msg);
+            alert(msg.dist);
+            onMove(Number(msg.dist) / RATIO);
+            if(msg.obstacle == "LeftBump")
+            {
+                addBump(false);
+            }
+            else if(msg.obstacle == "RightBump")
+            {
+                addBump(true);
+            }
+            else if(msg.obstacle == "CliffLeft")
+            {
+                addCliff(false);
+            }
+            else if(msg.obstacle == "CliffRight")
+            {
+                addCliff(true);
+            }
+            else if(msg.obstacle == "Color")
+            {
+                addBorder();
+            }
+        });
+
+        socket.on('rotateResult', function(msg){
+            alert(msg.degrees);
+            onRotate(-Number(msg.degrees));
+        });
+
+        function addData(data)
+        {
+            //Put it in millimeters first, then divide by 5.  Also account for the radius to place the center of the object
+            var distance = (Number(data.dist) + data.diameter / 2) * 10 / RATIO;
+            var x = Math.cos(((Number($scope.robot.rotated) - 90) + 180 - Number(data.angularDistance)) % 360 * Math.PI / 180) * distance + $scope.robot.sensorX;
+            //console.log($scope.robot.rotated - 90);
+            var y = Math.sin(((Number($scope.robot.rotated) - 90) + 180 - Number(data.angularDistance)) % 360 * Math.PI / 180) * distance + $scope.robot.sensorY;
+            var p = { x: x, y: y, diameter: data.diameter};
+            $scope.data.push(p);
+            console.log(data);
+            console.log($scope.data);
+            draw($scope.data);
+        }
+
+        function addBump(right){
+            var bumpAdjust = right ? 30 : -30;
+            var p = {
+                x: ($scope.robot.x)+ Math.cos((($scope.robot.rotated + bumpAdjust) * Math.PI) / 180) * 58,
+                y: $scope.robot.y + Math.sin((($scope.robot.rotated + bumpAdjust) * Math.PI) / 180) * 58};
+            $scope.bumps.push(p);
+            console.log(p);
+            draw($scope.data);
+        }
+
+        function addBorder(){
+            var p = {
+                x: $scope.robot.x + Math.cos(($scope.robot.rotated * Math.PI) / 180) * 58,
+                y: $scope.robot.y + Math.sin(($scope.robot.rotated * Math.PI) / 180) * 58};
+            $scope.borders.push(p);
+            console.log(p);
+            draw($scope.data);
+        }
+
+        function addCliff(right){
+            var cliffAdjust = right ? 30 : -30;
+            var p = {
+                x: $scope.robot.x + Math.cos((($scope.robot.rotated + cliffAdjust) * Math.PI) / 180) * 58,
+                y: $scope.robot.y + Math.sin((($scope.robot.rotated + cliffAdjust) * Math.PI) / 180) * 58};
+            $scope.cliffs.push(p);
+            console.log(p);
+            draw($scope.data);
+        }
+
+        function drawCliff(cliff) {
+            context.beginPath();
+//            var xoffset = $scope.robot.sensorX + Math.cos(($scope.robot.rotated * Math.PI) / 180) * 10;
+//            var yoffset = $scope.robot.sensorY + Math.sin(($scope.robot.rotated * Math.PI) / 180) * 10;
+            context.rect( cliff.x,cliff.y,10,10);
+            context.fillStyle = "#000000";
+            context.fill();
+            context.stroke();
+        }
+
+        function draw(data) {
+            context.clearRect(0, 0, canvas.width, canvas.height);
+            drawRobot($scope.robot);
+            for(var i=0; i<data.length; i++) {
+                drawDot(data[i]);
+            }
+            for(var i=0; i<$scope.bumps.length; i++) {
+                drawBump($scope.bumps[i]);
+            }
+            for(var i=0; i<$scope.cliffs.length; i++) {
+                drawCliff($scope.cliffs[i]);
+            }
+            for(var i=0; i<$scope.borders.length; i++) {
+                drawBorder($scope.borders[i]);
+            }
+        }
+
+        function drawDot(data) {
+            context.beginPath();
+            context.arc(data.x, data.y, data.diameter, 0, 2*Math.PI, false);
+            context.fillStyle = "#000000";
+            context.fill();
+            context.lineWidth = 1;
+            context.stroke();
+        }
+
+        function drawRobot(robot) {
+            context.beginPath();
+            context.arc(robot.x, robot.y, robot.diameter, 0, 2*Math.PI, false);
+            //context.lineTo(robot.x,robot.y);
+            context.fillStyle = "#FFFFFF";
+            context.fill();
+            context.lineWidth = 1;
+            context.stroke();
+            drawSensor();
+            drawFront();
+        }
+
+        function drawSensor(){
+            context.beginPath();
+            context.arc(
+                    $scope.robot.x,
+                    $scope.robot.y,
+                    $scope.robot.diameter,
+                    -(Math.PI / 2) + ($scope.robot.rotated * Math.PI) / 180,
+                    Math.PI/2 + ($scope.robot.rotated * Math.PI) / 180,
+                    false);
+            context.lineWidth = 3;
+            context.stroke();
+        }
+
+        function drawBump(bump) {
+            context.beginPath();
+            context.arc( bump.x,bump.y,5,2*Math.PI,false);
+            context.fillStyle = "#A52A2A";
+            context.fill();
+            context.stroke();
+        }
+
+        function drawFront() {
+            context.beginPath();
+            context.arc(
+                    $scope.robot.sensorX,
+                    $scope.robot.sensorY,
+                    1,
+                    0,
+                    2*Math.PI,
+                    false);
+            context.lineWidth = 1;
+            context.stroke();
+        }
+
+        function drawBorder(border) {
+            context.beginPath();
+            //var xoffset = $scope.robot.sensorX + Math.cos(($scope.robot.rotated * Math.PI) / 180) * 10;
+           // var yoffset = $scope.robot.sensorY + Math.sin(($scope.robot.rotated * Math.PI) / 180) * 10;
+            context.rect(border.x,border.y,10,10);
+            context.fillStyle = "#FFFFFF";
+            context.fill();
+            context.lineWidth = 1;
+            //context.fill();
+            context.stroke();
+        }
+
+        function updateSensor(){
+            $scope.robot.sensorX = $scope.robot.x + Math.cos(($scope.robot.rotated * Math.PI) / 180) * 15;
+            $scope.robot.sensorY = $scope.robot.y + Math.sin(($scope.robot.rotated * Math.PI) / 180) * 15;
+        }
+
+        function onRotate(deg){
+            $scope.robot.rotated += deg;
+            if($scope.robot.rotated < 0)
+            {
+                $scope.robot.rotated += 360;
+            }
+            if($scope.robot.rotated >= 360)
+            {
+                $scope.robot.rotated -= 360;
+            }
+            updateSensor();
+            draw($scope.data);
+        }
+
+        function onMove(distance){
+            $scope.robot.x += Math.cos(($scope.robot.rotated * Math.PI) / 180) * distance;
+            $scope.robot.y += Math.sin(($scope.robot.rotated * Math.PI) / 180) * distance;
+            updateSensor();
+            console.log($scope.robot);
+            draw($scope.data);
+        }
+
+        $('document').ready(function() {
+                    context.globalAlpha = 1.0;
+                    draw($scope.data);
+                }
+        );
+
+}
+</script>
+
+
+</body>
+</html>

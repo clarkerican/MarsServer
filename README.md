@@ -1,0 +1,7 @@
+This project is the GUI and server that navigated and recieved data from an iCreate robot via Bluetooth and NodeJS.
+
+For the Bluetooth connection, we used the serial-port bluetooth module. The hardest part was figuring out exactly how to connect to the robot.  Only one of the two ports that the robot was connected to could both read and write to the robot.  Then, when we recieved the data, the data would come multple times, with only the last time being the complete packet of data, so we created our own sort of buffer to hold data when we first started recieving the data, and a character to denote the end of a data packet.  Then we would parse out the data we required based upon the start of the sequence and what we expected to recieve. 
+
+Once we had all the data, we created a JSON object and sent it via Socket.io to the client webpage. The client could hen send commands and recieve data which used stores the data a draws it out on an html5 canvas using AngularJS.  The information about objects in front of the robot would be recieved relative to the robot, the client side has the robot mapped to a location which it will update as the robot drives around the course. When the client recieves the new data, it calculates where the fixed location of the object is based upon the current location and rotation of the robot. Then it will store the fixed location of the object.
+
+Although we demonstrated our GUI, the robot autonomously navigated the course for the 288 final.
